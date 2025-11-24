@@ -1,0 +1,32 @@
+# Ignore database files
+*.db
+*.db-journal
+*.sqlite
+
+# Ignore Rust build artifacts
+target/
+**/*.rs.bk
+
+# Ignore Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Ignore IDE settings
+.vscode/
+.idea/
+*.swp
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore logs
+*.log

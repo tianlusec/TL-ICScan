@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tianlu_intel_collectors"
+version = "0.1.0"
+description = "Vulnerability intelligence collectors for Tianlu"
+dependencies = [
+    "pydantic>=2.0",
+    "requests",
+    "python-dateutil"
+]
+requires-python = ">=3.8"
+
+[tool.setuptools.packages.find]
+where = ["."]
