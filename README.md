@@ -25,6 +25,8 @@ TL-ICScan 是由**天禄实验室**开发的一款面向安全研究人员、红
 - **纯粹情报**：专注于“情报”本身，不绑定资产管理，轻量级且易于集成。
 - **全平台支持**：原生支持 Windows、Linux 与 macOS，提供统一的 CLI 操作体验。
 
+![TL-ICScan Dashboard](docs/images/dashboard_preview.png)
+
 ---
 
 ## 核心功能

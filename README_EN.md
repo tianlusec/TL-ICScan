@@ -25,6 +25,8 @@ In daily security operations and research, we face challenges such as fragmented
 - **Pure Intelligence**: Focuses solely on "intelligence" itself, without binding to asset management, remaining lightweight and easy to integrate.
 - **Cross-Platform**: Native support for Windows, Linux, and macOS with a unified CLI experience.
 
+![TL-ICScan Dashboard](docs/images/dashboard_preview.png)
+
 ---
 
 ## Key Features
