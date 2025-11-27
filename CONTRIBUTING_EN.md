@@ -1,4 +1,4 @@
-# Contributing to TL-ICScan
+# Contributing to TL-ICScan Vulnerability Intelligence Aggregation and Analysis Tool
 
 Thank you for your interest in TL-ICScan! We welcome community contributions.
 
@@ -7,7 +7,7 @@ Thank you for your interest in TL-ICScan! We welcome community contributions.
 1. **Fork this repository**: Click the Fork button in the top right corner.
 2. **Clone to local**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Tianlu.git
+   git clone https://github.com/YOUR_USERNAME/TL-ICScan.git
    ```
 3. **Create a new branch**:
    ```bash
@@ -20,6 +20,7 @@ Please refer to the "Quick Start" section in `README.md` to set up your Rust and
 
 - **Rust**: Use `cargo fmt` and `cargo clippy` to ensure code style consistency.
 - **Python**: Use `black` or `flake8` to maintain code cleanliness.
+- **Web UI**: Developed using `streamlit`. Run `streamlit run web_ui/dashboard.py` to start the development server.
 
 ## Commit Conventions
 

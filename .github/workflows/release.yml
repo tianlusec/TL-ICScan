@@ -44,13 +44,21 @@ jobs:
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+          ARTIFACT: ${{ matrix.artifact_name }}
+          ASSET: ${{ matrix.asset_name }}
         run: |
-          mv tianlu-intel-core/target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+          mv "tianlu-intel-core/target/$TARGET/release/$ARTIFACT" "$ASSET"
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+          ARTIFACT: ${{ matrix.artifact_name }}
+          ASSET: ${{ matrix.asset_name }}
         run: |
-          Move-Item tianlu-intel-core/target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+          Move-Item -Path "tianlu-intel-core/target/$env:TARGET/release/$env:ARTIFACT" -Destination "$env:ASSET"
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1

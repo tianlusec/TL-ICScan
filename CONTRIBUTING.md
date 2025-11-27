@@ -1,13 +1,13 @@
-# Contributing to TL-ICScan
+# Contributing to TL-ICScan 漏洞情报聚合与分析工具
 
-感谢您对 TL-ICScan 的关注！我们非常欢迎社区贡献。
+感谢您对 TL-ICScan 漏洞情报聚合与分析工具的关注！我们非常欢迎社区贡献。
 
 ## 如何开始
 
 1. **Fork 本仓库**：点击右上角的 Fork 按钮。
 2. **Clone 到本地**：
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Tianlu.git
+   git clone https://github.com/YOUR_USERNAME/TL-ICScan.git
    ```
 3. **创建新分支**：
    ```bash
@@ -20,6 +20,7 @@
 
 - **Rust**: 使用 `cargo fmt` 和 `cargo clippy` 确保代码风格。
 - **Python**: 使用 `black` 或 `flake8` 保持代码整洁。
+- **Web UI**: 使用 `streamlit` 开发。运行 `streamlit run web_ui/dashboard.py` 启动开发服务器。
 
 ## 提交规范
 

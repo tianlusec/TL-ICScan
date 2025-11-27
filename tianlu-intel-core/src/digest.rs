@@ -2,7 +2,6 @@ use crate::db::connect;
 use crate::query::CveRecord;
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use sqlx::Row;
 use std::fs;
 
 #[derive(Debug, Deserialize)]
@@ -16,11 +15,11 @@ pub struct WatchlistItem {
     pub keywords: Option<Vec<String>>,
     pub vendors: Option<Vec<String>>,
     pub products: Option<Vec<String>>,
-    pub severity_min: Option<String>, // LOW, MEDIUM, HIGH, CRITICAL
+    pub severity_min: Option<String>,
 }
 
 fn severity_to_rank(sev: &str) -> i32 {
-    match sev.to_uppercase().as_str() {
+    match sev.trim().to_uppercase().as_str() {
         "CRITICAL" => 4,
         "HIGH" => 3,
         "MEDIUM" => 2,
@@ -50,7 +49,7 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
     
     let config_content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path))?;
-    let config: Vec<WatchlistItem> = serde_yaml::from_str(&config_content)
+    let config: WatchlistConfig = serde_yaml::from_str(&config_content)
         .with_context(|| "Failed to parse YAML config")?;
 
     let parsed_since = parse_since_date(since);
@@ -62,15 +61,13 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
         println!("**CVE Filter**: {}\n", pattern);
     }
 
-    for item in config {
+    for item in config.items {
         println!("## {}\n", item.name);
 
         let mut query_str = "SELECT * FROM cve_records WHERE publish_date >= ?".to_string();
         
-        // Build dynamic query parts
         let mut conditions = Vec::new();
         
-        // Keywords (OR logic within keywords)
         if let Some(kws) = &item.keywords {
             if !kws.is_empty() {
                 let kw_conds: Vec<String> = kws.iter()
@@ -80,7 +77,6 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
             }
         }
 
-        // Vendors (OR logic)
         if let Some(vs) = &item.vendors {
             if !vs.is_empty() {
                 let v_conds: Vec<String> = vs.iter()
@@ -90,7 +86,6 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
             }
         }
 
-        // Products (OR logic)
         if let Some(ps) = &item.products {
             if !ps.is_empty() {
                 let p_conds: Vec<String> = ps.iter()
@@ -106,9 +101,24 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
             query_str.push_str(")");
         }
 
-        // Apply CVE Pattern filter if provided
         if cve_pattern.is_some() {
             query_str.push_str(" AND cve_id LIKE ?");
+        }
+
+        let min_rank = item.severity_min.as_ref().map(|s| severity_to_rank(s)).unwrap_or(0);
+        let mut allowed_severities = Vec::new();
+        if min_rank > 0 {
+            let all_severities = vec!["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+            for sev in all_severities {
+                if severity_to_rank(sev) >= min_rank {
+                    allowed_severities.push(sev.to_string());
+                }
+            }
+            
+            if !allowed_severities.is_empty() {
+                let placeholders: Vec<String> = allowed_severities.iter().map(|_| "?".to_string()).collect();
+                query_str.push_str(&format!(" AND severity IN ({})", placeholders.join(", ")));
+            }
         }
 
         query_str.push_str(" ORDER BY publish_date DESC");
@@ -116,7 +126,6 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
         let mut query = sqlx::query_as::<_, CveRecord>(&query_str)
             .bind(&parsed_since);
 
-        // Bind parameters
         if let Some(kws) = &item.keywords {
             for kw in kws {
                 let pattern = format!("%{}%", kw);
@@ -136,18 +145,7 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
             }
         }
 
-        // Bind CVE Pattern
         if let Some(pattern) = cve_pattern {
-            // If user didn't provide %, add it? 
-            // User asked for "CVE-2025开头" (starts with CVE-2025).
-            // If they pass "CVE-2025", we should probably treat it as "CVE-2025%".
-            // But standard CLI behavior is usually explicit.
-            // However, for ease of use, if it doesn't contain %, maybe we append it?
-            // Let's stick to explicit for now, or just append % if not present?
-            // The user said "CVE-2025开头".
-            // If I pass "CVE-2025%", it works.
-            // Let's just bind what they pass. I'll document/tell them to use %.
-            // Actually, to be nice, if they say "CVE-2025", I'll make it "CVE-2025%".
             let mut p = pattern.clone();
             if !p.contains('%') {
                 p.push('%');
@@ -155,9 +153,11 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
             query = query.bind(p);
         }
 
+        for sev in allowed_severities {
+            query = query.bind(sev);
+        }
+
         let rows = query.fetch_all(&pool).await?;
-        
-        let min_rank = item.severity_min.as_ref().map(|s| severity_to_rank(s)).unwrap_or(0);
         
         let mut count = 0;
         for row in rows {
@@ -177,7 +177,7 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
             if row.exploit_exists.unwrap_or(false) { flags.push("💥 **Exploit**".to_string()); }
             
             if let Some(epss) = row.epss_score {
-                if epss > 0.1 { // > 10% probability is considered high
+                if epss > 0.1 {
                     flags.push(format!("🔥 **EPSS: {:.1}%**", epss * 100.0));
                 }
             }
@@ -190,7 +190,6 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
                 let short_desc: String = desc.chars().take(150).collect();
                 println!("  - *Summary*: {}...", short_desc.replace("\n", " "));
             }
-            // Sources
             let sources: Vec<String> = serde_json::from_str(&row.sources).unwrap_or_default();
             println!("  - *Sources*: {}", sources.join(", "));
             println!();

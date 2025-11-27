@@ -3,11 +3,12 @@ import json
 import sys
 import os
 import re
+import time
 import argparse
 from datetime import datetime, timedelta
+from .utils import get_session
 from typing import List, Dict, Any
 
-# GitHub API URL
 GITHUB_API_URL = "https://api.github.com/search/repositories"
 
 def get_github_headers():
@@ -24,60 +25,74 @@ def search_github_pocs(since_date: datetime, keywords: List[str] = None):
     Search GitHub for repositories related to CVEs.
     """
     if not keywords:
-        # Default to searching for generic CVE pattern if no specific keywords
-        # We search for repositories created or updated recently containing "CVE"
         keywords = ["CVE"]
 
-    # Format date for GitHub query
     date_str = since_date.strftime("%Y-%m-%d")
     
-    # Construct query
-    # We want repos that mention CVE and were pushed recently
     query_parts = [f"pushed:>{date_str}"]
     
-    # Join keywords with OR is not directly supported in the same way as simple text, 
-    # but we can just search for "CVE" generally.
-    # A better approach for a broad monitor is just "CVE" in name/desc
-    query_parts.append("CVE")
+    if keywords:
+        keyword_query = " OR ".join(keywords)
+        query_parts.append(f"({keyword_query})")
     
     query = " ".join(query_parts)
     
+    session = get_session()
     page = 1
+    max_pages = 50
     while True:
+        if page > max_pages:
+            sys.stderr.write("Aborting GitHub search: exceeded maximum pages.\n")
+            break
+
         params = {
             "q": query,
             "sort": "updated",
             "order": "desc",
-            "per_page": 100,  # Max per page
+            "per_page": 100,
             "page": page
         }
 
         try:
-            response = requests.get(GITHUB_API_URL, headers=get_github_headers(), params=params)
-            
+            response = session.get(GITHUB_API_URL, headers=get_github_headers(), params=params, timeout=30)
+
             if response.status_code == 403:
-                # Rate limit hit
-                sys.stderr.write("Error: GitHub API rate limit exceeded. Please set GITHUB_TOKEN environment variable.\n")
-                return
-                
+                reset_time = response.headers.get("X-RateLimit-Reset")
+                if reset_time:
+                    sleep_seconds = int(reset_time) - int(time.time()) + 5
+                    if sleep_seconds > 0:
+                        sys.stderr.write(f"Rate limit exceeded. Sleeping for {sleep_seconds} seconds...\n")
+                        time.sleep(sleep_seconds)
+                        continue
+
+                sys.stderr.write("Error: GitHub API rate limit exceeded and no reset time found.\n")
+                time.sleep(60)
+                sys.stderr.write("Aborting search to prevent IP ban.\n")
+                break
+
             response.raise_for_status()
-            data = response.json()
-            
+            try:
+                data = response.json()
+            except Exception:
+                sys.stderr.write("Error decoding GitHub response as JSON.\n")
+                break
+
             items = data.get("items", [])
             if not items:
                 break
-            
+
             for item in items:
                 process_repo_item(item)
-            
+
             page += 1
-            # GitHub Search API limits to 1000 results (10 pages)
             if page > 10:
                 break
-                
+
+            time.sleep(2.0)
+
         except Exception as e:
             sys.stderr.write(f"Error searching GitHub: {e}\n")
-            break
+            time.sleep(5)
 
 def extract_cve_ids(text: str) -> List[str]:
     """Extract CVE IDs from text using regex."""
@@ -96,26 +111,16 @@ def process_repo_item(item: Dict[str, Any]):
     stargazers_count = item.get("stargazers_count", 0)
     forks_count = item.get("forks_count", 0)
     
-    # Try to find CVE ID in name or description
     cve_ids = set(extract_cve_ids(name) + extract_cve_ids(description))
     
     if not cve_ids:
-        # If no CVE ID found, we might skip or output with a placeholder if we want to track "potential" PoCs
-        # For now, let's skip to keep noise down
         return
 
     for cve_id in cve_ids:
         cve_id = cve_id.upper()
         
-        # Construct NormalizedCVE object
-        # Note: We might generate multiple records for the same repo if it mentions multiple CVEs
-        
         record = {
             "cve_id": cve_id,
-            # We don't overwrite title/desc from official sources usually, 
-            # but if this is a new CVE, this might be useful.
-            # However, the aggregator logic usually merges.
-            # Let's put the repo info in extra and poc_sources
             "exploit_exists": True,
             "poc_sources": [html_url],
             "extra": {
@@ -140,7 +145,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Parse since argument
     since_date = datetime.now()
     if args.since.endswith("d"):
         days = int(args.since[:-1])

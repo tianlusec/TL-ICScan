@@ -1,4 +1,4 @@
-# TL-ICScan (天禄情报收集系统)
+# TL-ICScan 漏洞情报聚合与分析工具
 
 > 本仓库为 TL-ICScan 的代码与采集脚本集合。
 >
@@ -9,6 +9,13 @@
 ## 项目简介
 
 TL-ICScan 是由**天禄实验室**开发的一款面向安全研究人员、红队与蓝队的**本地化漏洞情报聚合与分析工具**。
+
+**一句话原理解析：**
+> **Python 负责“进货”，Rust 负责“管库”。**
+> 
+> *   **Python (采集端)**：像勤劳的采购员，去 NVD、GitHub、Exploit-DB 等网站抓取最新的漏洞情报，并把它们“翻译”成统一格式。
+> *   **Rust (核心库)**：像高效的仓库管理员，负责把 Python 抓回来的海量数据快速存入本地数据库，并提供毫秒级的查询服务。
+> *   **Web UI (展示端)**：直接读取本地数据库，为您提供无需联网、随查随有的可视化查询体验。
 
 在日常的安全运营与研究中，我们面临着情报源分散（NVD, CISA, 厂商公告, Exploit-DB）、数据格式不统一、以及过度依赖在线查询等痛点。TL-ICScan 旨在解决这些问题：
 
@@ -45,9 +52,9 @@ cd tianlu-intel-core
 cargo build --release
 # 编译产物位于 target/release/tianlu-intel-core (Windows 为 .exe)
 
-# 2. 安装采集器依赖
-cd ../tianlu_intel_collectors
-pip install -e .
+# 2. 安装依赖
+# 在项目根目录下运行
+pip install -r requirements.txt
 ```
 
 ### 3. 初始化与更新数据
@@ -60,6 +67,12 @@ pip install -e .
 ### 4. 常用命令
 
 所有操作通过 CLI 工具完成（假设位于项目根目录）：
+
+**启动 Web UI (可视化仪表盘)**
+```bash
+# 启动 Web 界面，默认访问 http://localhost:8501
+streamlit run web_ui/dashboard.py
+```
 
 **查询漏洞列表**
 ```bash

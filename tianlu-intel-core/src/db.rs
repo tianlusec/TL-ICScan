@@ -6,8 +6,19 @@ use std::path::Path;
 pub async fn connect(db_path: &str) -> Result<Pool<Sqlite>> {
     let db_url = format!("sqlite:{}", db_path);
     let pool = SqlitePoolOptions::new()
+        .max_connections(5)
+        .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(&db_url)
         .await?;
+    
+    sqlx::query("PRAGMA busy_timeout = 30000;")
+        .execute(&pool)
+        .await?;
+
+    sqlx::query("PRAGMA journal_mode = WAL;")
+        .execute(&pool)
+        .await?;
+        
     Ok(pool)
 }
 
@@ -58,8 +69,11 @@ pub async fn init_db(db_path: &str) -> Result<()> {
     .execute(&pool)
     .await?;
 
-    // Attempt to add columns for existing databases (v0.1 -> v0.2 migration)
-    // We ignore errors because they likely mean the column already exists.
+    let _ = sqlx::query("ALTER TABLE cve_records ADD COLUMN vendors TEXT").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE cve_records ADD COLUMN products TEXT").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE cve_records ADD COLUMN \"references\" TEXT").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE cve_records ADD COLUMN sources TEXT").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE cve_records ADD COLUMN raw_data TEXT").execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE cve_records ADD COLUMN cwe_ids TEXT").execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE cve_records ADD COLUMN attack_vector TEXT").execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE cve_records ADD COLUMN privileges_required TEXT").execute(&pool).await;

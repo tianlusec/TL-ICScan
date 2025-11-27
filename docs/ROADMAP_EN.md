@@ -107,14 +107,15 @@ Acceptance Criteria: Display PoC source and its risk label in `show` output, and
 
 ---
 
-## v0.6 — Web UI (Optional, Not Required)
+## v0.6 — Web UI (Partially Implemented)
 
 Goal: Provide a lightweight frontend dashboard for end-users, displaying digest, search, and watchlist management (Backend continues to remain CLI-first).
 
 Implementation Suggestions:
 
-- Use static frontend (React/Vue) + a small backend (Rust warp/axum or Python FastAPI) as read-only API.
-- Priority: Filter page (vendor/product/epss/cwe), digest browsing, watchlist management.
+- [x] Use Streamlit for rapid prototyping and interactive dashboard.
+- [x] Implement basic filtering page (time range, source, keywords).
+- [ ] Add watchlist management and advanced charts.
 
 Compliance Suggestion: Web UI should only read DB or provide data via exported API, and not implement any PoC execution functions within the UI.
 

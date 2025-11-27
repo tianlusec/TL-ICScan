@@ -1,4 +1,4 @@
-# TL-ICScan
+# TL-ICScan Vulnerability Intelligence Aggregation and Analysis Tool
 
 > This repository contains the code and collection scripts for TL-ICScan.
 >
@@ -9,6 +9,13 @@
 ## Introduction
 
 TL-ICScan is a **localized vulnerability intelligence aggregation and analysis tool** developed by **Tianlu Laboratory**, designed for security researchers, Red Teams, and Blue Teams.
+
+**How it Works (In a Nutshell):**
+> **Python "Fetches", Rust "Manages".**
+>
+> *   **Python (Collector)**: Acts as a diligent procurement agent, fetching the latest vulnerability intelligence from NVD, GitHub, Exploit-DB, etc., and "translating" them into a unified format.
+> *   **Rust (Core Engine)**: Acts as an efficient warehouse manager, rapidly storing the massive data fetched by Python into a local database and providing millisecond-level query services.
+> *   **Web UI (Dashboard)**: Reads directly from the local database, offering an offline, instant, and visual query experience.
 
 In daily security operations and research, we face challenges such as fragmented intelligence sources (NVD, CISA, Vendor Advisories, Exploit-DB), inconsistent data formats, and over-reliance on online queries. TL-ICScan aims to solve these problems:
 
@@ -59,11 +66,17 @@ We provide a one-click update script that automatically runs all collectors and 
 
 ### 4. Common Commands
 
-All operations are performed via the CLI tool (assuming you are in the project root):
+All operations are done via the CLI tool (assuming you are in the project root directory):
+
+**Start Web UI (Dashboard)**
+```bash
+# Start the Web interface, default access at http://localhost:8501
+streamlit run web_ui/dashboard.py
+```
 
 **Query Vulnerability List**
 ```bash
-# Query high-severity vulnerabilities released in the last 7 days
+# Query high-severity vulnerabilities published in the last 7 days
 ./tianlu-intel-core/target/release/tianlu-intel-core list --since 7d --severity HIGH --db tianlu_intel_v2.db
 ```
 

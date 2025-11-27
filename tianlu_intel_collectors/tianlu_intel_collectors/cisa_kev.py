@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+import ijson
 from datetime import datetime
 
 from .models import NormalizedCVE
@@ -11,11 +12,14 @@ CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_v
 def fetch_cisa_kev():
     session = get_session()
     try:
-        response = session.get(CISA_KEV_URL, timeout=30)
+        response = session.get(CISA_KEV_URL, timeout=30, stream=True)
         response.raise_for_status()
-        data = response.json()
         
-        vulnerabilities = data.get("vulnerabilities", [])
+        f = response.raw
+        f.decode_content = True
+        
+        vulnerabilities = ijson.items(f, 'vulnerabilities.item')
+        
         for item in vulnerabilities:
             try:
                 normalized = parse_cisa_kev(item)
@@ -29,7 +33,6 @@ def fetch_cisa_kev():
 def parse_cisa_kev(item: dict) -> NormalizedCVE:
     cve_id = item.get("cveID")
     
-    # Dates in CISA are usually YYYY-MM-DD
     date_added = item.get("dateAdded")
     publish_date = None
     if date_added:
@@ -46,9 +49,6 @@ def parse_cisa_kev(item: dict) -> NormalizedCVE:
     
     vendors = [vendor] if vendor else []
     products = [product] if product else []
-    
-    # CISA doesn't provide CVSS or Severity directly in this feed usually, 
-    # but we can leave them None.
     
     extra = {"cisa_kev_raw": item}
     

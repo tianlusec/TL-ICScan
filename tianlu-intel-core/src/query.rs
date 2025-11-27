@@ -2,8 +2,9 @@ use crate::cli::ExportFormat;
 use crate::db::connect;
 use anyhow::Result;
 use serde::Serialize;
-use sqlx::{Row, FromRow};
-use std::io::{self, Write};
+use sqlx::FromRow;
+use sqlx::QueryBuilder;
+use sqlx::Sqlite;
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct CveRecord {
@@ -15,14 +16,13 @@ pub struct CveRecord {
     pub cvss_v3_score: Option<f64>,
     pub publish_date: Option<String>,
     pub update_date: Option<String>,
-    pub vendors: String, // JSON string
-    pub products: String, // JSON string
-    pub references: String, // JSON string
-    pub sources: String, // JSON string
+    pub vendors: String,
+    pub products: String,
+    pub references: String,
+    pub sources: String,
     pub raw_data: Option<String>,
     
-    // New fields v0.2
-    pub cwe_ids: Option<String>, // JSON string
+    pub cwe_ids: Option<String>,
     pub attack_vector: Option<String>,
     pub privileges_required: Option<String>,
     pub user_interaction: Option<String>,
@@ -32,13 +32,11 @@ pub struct CveRecord {
     pub is_in_kev: Option<bool>,
     pub exploit_exists: Option<bool>,
 
-    // New fields v0.5
-    pub poc_sources: Option<String>, // JSON string
+    pub poc_sources: Option<String>,
     pub poc_repo_count: Option<i64>,
     pub poc_risk_label: Option<String>,
     pub feed_version: Option<String>,
 
-    // New fields v0.6
     pub epss_score: Option<f64>,
     pub epss_percentile: Option<f64>,
 }
@@ -59,51 +57,59 @@ pub async fn list_cves(
 ) -> Result<()> {
     let pool = connect(db_path).await?;
     
-    let mut query_str = "SELECT * FROM cve_records WHERE 1=1".to_string();
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT * FROM cve_records WHERE 1=1");
     
     if let Some(s) = &since {
-        query_str.push_str(&format!(" AND publish_date >= '{}'", s));
+        qb.push(" AND publish_date >= ");
+        qb.push_bind(s);
     }
     if let Some(u) = &until {
-        query_str.push_str(&format!(" AND publish_date <= '{}'", u));
+        qb.push(" AND publish_date <= ");
+        qb.push_bind(u);
     }
     if let Some(sev) = &severity {
-        query_str.push_str(&format!(" AND severity = '{}'", sev));
+        qb.push(" AND severity = ");
+        qb.push_bind(sev);
     }
     if let Some(kw) = &keyword {
-        query_str.push_str(&format!(" AND (title LIKE '%{}%' OR description LIKE '%{}%')", kw, kw));
+        let pattern = format!("%{}%", kw);
+        qb.push(" AND (title LIKE ");
+        qb.push_bind(pattern.clone());
+        qb.push(" OR description LIKE ");
+        qb.push_bind(pattern);
+        qb.push(")");
     }
     if let Some(c) = &cwe {
-        // cwe_ids is a JSON array string, e.g. ["CWE-79", "CWE-89"]
-        query_str.push_str(&format!(" AND cwe_ids LIKE '%{}%'", c));
+        qb.push(" AND cwe_ids LIKE ");
+        qb.push_bind(format!("%{}%", c));
     }
     if let Some(av) = &attack_vector {
-        query_str.push_str(&format!(" AND attack_vector = '{}'", av));
+        qb.push(" AND attack_vector = ");
+        qb.push_bind(av);
     }
     if in_kev {
-        query_str.push_str(" AND is_in_kev = 1");
+        qb.push(" AND is_in_kev = 1");
     }
     if let Some(src) = &source {
-        // sources is a JSON array string, e.g. ["nvd", "msrc"]
-        // We can use LIKE for simplicity
-        query_str.push_str(&format!(" AND sources LIKE '%{}%'", src));
+        qb.push(" AND sources LIKE ");
+        qb.push_bind(format!("%{}%", src));
     }
     if let Some(v) = &vendor {
-        // vendors is a JSON array string
-        query_str.push_str(&format!(" AND vendors LIKE '%{}%'", v));
+        qb.push(" AND vendors LIKE ");
+        qb.push_bind(format!("%{}%", v));
     }
     if let Some(p) = &product {
-        // products is a JSON array string
-        query_str.push_str(&format!(" AND products LIKE '%{}%'", p));
+        qb.push(" AND products LIKE ");
+        qb.push_bind(format!("%{}%", p));
     }
     
-    query_str.push_str(&format!(" ORDER BY publish_date DESC LIMIT {}", limit));
+    qb.push(" ORDER BY publish_date DESC LIMIT ");
+    qb.push_bind(limit);
 
-    let rows = sqlx::query_as::<_, CveRecord>(&query_str)
+    let rows = qb.build_query_as::<CveRecord>()
         .fetch_all(&pool)
         .await?;
 
-    // Print table header
     println!("{:<15} {:<8} {:<5} {:<8} {:<12} {:<5} {:<30}", "CVE ID", "SEVERITY", "CVSS", "EPSS", "PUBLISHED", "KEV", "TITLE");
     println!("{}", "-".repeat(95));
 
@@ -209,16 +215,18 @@ pub async fn export_cves(
 ) -> Result<()> {
     let pool = connect(db_path).await?;
     
-    let mut query_str = "SELECT * FROM cve_records WHERE 1=1".to_string();
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT * FROM cve_records WHERE 1=1");
     
     if let Some(s) = &since {
-        query_str.push_str(&format!(" AND publish_date >= '{}'", s));
+        qb.push(" AND publish_date >= ");
+        qb.push_bind(s);
     }
     if let Some(sev) = &severity {
-        query_str.push_str(&format!(" AND severity = '{}'", sev));
+        qb.push(" AND severity = ");
+        qb.push_bind(sev);
     }
     
-    let rows = sqlx::query_as::<_, CveRecord>(&query_str)
+    let rows = qb.build_query_as::<CveRecord>()
         .fetch_all(&pool)
         .await?;
 
@@ -230,6 +238,11 @@ pub async fn export_cves(
         ExportFormat::Csv => {
             println!("cve_id,severity,cvss_v3_score,epss_score,publish_date,title");
             for row in rows {
+                let mut title = row.title.unwrap_or_default();
+                if title.starts_with('=') || title.starts_with('+') || title.starts_with('-') || title.starts_with('@') {
+                    title.insert(0, '\'');
+                }
+                
                 println!(
                     "{},{},{},{},{},\"{}\"",
                     row.cve_id,
@@ -237,7 +250,7 @@ pub async fn export_cves(
                     row.cvss_v3_score.unwrap_or(0.0),
                     row.epss_score.unwrap_or(0.0),
                     row.publish_date.unwrap_or_default(),
-                    row.title.unwrap_or_default().replace("\"", "\"\"")
+                    title.replace("\"", "\"\"")
                 );
             }
         }

@@ -107,14 +107,15 @@ CLI 扩展（必须实现）：
 
 ---
 
-## v0.6 — Web UI（可选，非必须）
+## v0.6 — Web UI（部分已实现）
 
 目标：为终端用户提供一个轻量级的前端仪表盘，展示 digest、搜索与 watchlist 管理（后端继续保持 CLI-first）。
 
 实现建议：
 
-- 使用静态前端（React/Vue） + 一个小型后端（Rust warp/axum 或 Python FastAPI）作为只读 API。
-- 优先做：筛选页面（vendor/product/epss/cwe）、digest 浏览、watchlist 管理。
+- [x] 使用 Streamlit 提供快速原型与交互式仪表盘。
+- [x] 实现基础筛选页面（时间范围、来源、关键词）。
+- [ ] 增加 watchlist 管理与高级图表。
 
 合规建议：Web UI 应只读访问 DB 或通过导出的 API 提供数据，不在 UI 内实现任何 PoC 执行功能。
 

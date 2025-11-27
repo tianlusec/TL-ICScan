@@ -1,6 +1,8 @@
 # Ignore database files
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 
 # Ignore Rust build artifacts
@@ -30,3 +32,8 @@ Thumbs.db
 
 # Ignore logs
 *.log
+
+# Ignore data files
+*.jsonl
+data/
+

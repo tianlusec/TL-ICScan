@@ -9,7 +9,10 @@ description = "Vulnerability intelligence collectors for Tianlu"
 dependencies = [
     "pydantic>=2.0",
     "requests",
-    "python-dateutil"
+    "python-dateutil",
+    "certifi",
+    "ijson",
+    "defusedxml"
 ]
 requires-python = ">=3.8"
 

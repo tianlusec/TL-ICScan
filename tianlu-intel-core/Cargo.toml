@@ -2,6 +2,9 @@
 name = "tianlu-intel-core"
 version = "0.1.0"
 edition = "2021"
+authors = ["Tianlu Lab <contact@tianlu.lab>"]
+description = "Core engine for TL-ICScan vulnerability intelligence tool"
+license = "MIT"
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }

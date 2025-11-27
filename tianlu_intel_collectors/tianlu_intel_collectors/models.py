@@ -1,14 +1,22 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+import re
 
 class NormalizedCVE(BaseModel):
     cve_id: str
 
+    @field_validator('cve_id')
+    @classmethod
+    def validate_cve_id(cls, v: str) -> str:
+        if not re.match(r'^CVE-\d{4}-\d{4,}$', v):
+            raise ValueError(f"Invalid CVE ID format: {v}")
+        return v
+
     title: Optional[str] = None
     description: Optional[str] = None
 
-    severity: Optional[str] = None  # "LOW" / "MEDIUM" / "HIGH" / "CRITICAL" / None
+    severity: Optional[str] = None
     cvss_v2_score: Optional[float] = None
     cvss_v3_score: Optional[float] = None
 
@@ -20,7 +28,6 @@ class NormalizedCVE(BaseModel):
 
     references: List[str] = Field(default_factory=list)
 
-    # v0.2 fields
     cwe_ids: Optional[List[str]] = None
     attack_vector: Optional[str] = None
     privileges_required: Optional[str] = None
@@ -31,13 +38,14 @@ class NormalizedCVE(BaseModel):
     is_in_kev: Optional[bool] = None
     exploit_exists: Optional[bool] = None
 
-    # v0.5 fields
     poc_sources: Optional[List[str]] = None
     poc_repo_count: Optional[int] = None
     poc_risk_label: Optional[str] = None
     feed_version: Optional[str] = None
 
-    # Source specific extra data
+    epss_score: Optional[float] = None
+    epss_percentile: Optional[float] = None
+
     extra: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:

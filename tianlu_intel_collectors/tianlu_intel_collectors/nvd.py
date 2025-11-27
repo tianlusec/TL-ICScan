@@ -2,21 +2,32 @@ import argparse
 import json
 import sys
 import time
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
 from .models import NormalizedCVE
 from .utils import get_session
+import re
 
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
-def fetch_nvd_cves(since: Optional[str] = None, api_key: Optional[str] = None):
+def fetch_nvd_cves(since: Optional[str] = None, api_key: Optional[str] = None, cve_id: Optional[str] = None):
     session = get_session()
-    if api_key:
-        session.headers.update({"apiKey": api_key})
-        sleep_time = 0.6  # With API key: 50 req / 30 sec ~= 0.6s
+    
+    final_api_key = api_key or os.environ.get("NVD_API_KEY")
+    
+    if final_api_key:
+        session.headers.update({"apiKey": final_api_key})
+        sleep_time = 0.6
     else:
-        sleep_time = 6.0  # Without API key: 5 req / 30 sec = 6s
+        sys.stderr.write("Warning: No NVD API Key provided (via arg or NVD_API_KEY env var). Using strict rate limits.\n")
+        sleep_time = 6.0
+
+    if cve_id:
+        sys.stderr.write(f"Fetching specific CVE: {cve_id}...\n")
+        fetch_nvd_single(session, cve_id, sleep_time)
+        return
 
     start_date = datetime.now() - timedelta(days=7)
     if since:
@@ -28,7 +39,6 @@ def fetch_nvd_cves(since: Optional[str] = None, api_key: Optional[str] = None):
 
     end_date = datetime.now()
     
-    # NVD API limits time range to 120 days. We split larger ranges into chunks.
     current_start = start_date
     while current_start < end_date:
         current_end = current_start + timedelta(days=120)
@@ -40,6 +50,29 @@ def fetch_nvd_cves(since: Optional[str] = None, api_key: Optional[str] = None):
         
         current_start = current_end
 
+def fetch_nvd_single(session, cve_id, sleep_time):
+    params = {
+        "cveId": cve_id
+    }
+    try:
+        response = session.get(NVD_API_URL, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        vulnerabilities = data.get("vulnerabilities", [])
+        for item in vulnerabilities:
+            cve_item = item.get("cve", {})
+            try:
+                normalized = parse_nvd_cve(cve_item)
+                print(normalized.model_dump_json())
+            except Exception as e:
+                sys.stderr.write(f"Error parsing CVE: {e}\n")
+        
+        time.sleep(sleep_time)
+        
+    except Exception as e:
+        sys.stderr.write(f"Error fetching NVD data: {e}\n")
+
 def fetch_nvd_chunk(session, start_dt, end_dt, sleep_time):
     params = {
         "resultsPerPage": 2000,
@@ -48,48 +81,71 @@ def fetch_nvd_chunk(session, start_dt, end_dt, sleep_time):
         "pubEndDate": end_dt.isoformat()
     }
 
+    loop_count = 0
+    MAX_PAGES = 250
+
     while True:
-        try:
-            response = session.get(NVD_API_URL, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            
-            vulnerabilities = data.get("vulnerabilities", [])
-            for item in vulnerabilities:
-                cve_item = item.get("cve", {})
-                try:
-                    normalized = parse_nvd_cve(cve_item)
-                    print(normalized.model_dump_json())
-                except Exception as e:
-                    sys.stderr.write(f"Error parsing CVE: {e}\n")
-            
-            total_results = data.get("totalResults", 0)
-            start_index = data.get("startIndex", 0)
-            results_per_page = data.get("resultsPerPage", 0)
-            
-            if start_index + results_per_page >= total_results:
-                break
-                
-            params["startIndex"] += results_per_page
-            time.sleep(sleep_time) 
-            
-        except Exception as e:
-            sys.stderr.write(f"Error fetching NVD data: {e}\n")
+        loop_count += 1
+        if loop_count > MAX_PAGES:
+            sys.stderr.write("NVD fetch aborted: exceeded max page iterations.\n")
             break
+
+        success = False
+        for attempt in range(3):
+            try:
+                response = session.get(NVD_API_URL, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                success = True
+                break
+            except Exception as e:
+                sys.stderr.write(f"Error fetching NVD data (attempt {attempt+1}/3): {e}\n")
+                time.sleep(sleep_time * (attempt + 1) * 2)
+
+        if not success:
+            sys.stderr.write(f"Failed to fetch chunk starting at {params['startIndex']} after 3 attempts. Aborting to prevent data gap.\n")
+            raise RuntimeError(f"NVD fetch failed for chunk {start_dt} - {end_dt}")
+
+        vulnerabilities = data.get("vulnerabilities", [])
+        if not vulnerabilities:
+            sys.stderr.write(f"Warning: Received empty vulnerabilities list at index {params['startIndex']}. Stopping chunk fetch.\n")
+            break
+
+        for item in vulnerabilities:
+            cve_item = item.get("cve", {})
+            try:
+                normalized = parse_nvd_cve(cve_item)
+                if normalized:
+                    if re.match(r'^CVE-\d{4}-\d{4,}$', normalized.cve_id or ''):
+                        print(normalized.model_dump_json())
+                    else:
+                        sys.stderr.write(f"Skipping invalid CVE id: {normalized.cve_id}\n")
+            except Exception as e:
+                sys.stderr.write(f"Error parsing CVE: {e}\n")
+
+        total_results = data.get("totalResults", 0)
+        start_index = data.get("startIndex", 0)
+        items_count = len(vulnerabilities)
+
+        if items_count == 0:
+             break
+
+        if total_results and start_index + items_count >= total_results:
+            break
+
+        params["startIndex"] += items_count
+        time.sleep(sleep_time)
 
 def parse_nvd_cve(cve: dict) -> NormalizedCVE:
     cve_id = cve.get("id")
     
-    # Descriptions
     descriptions = cve.get("descriptions", [])
     description = next((d["value"] for d in descriptions if d["lang"] == "en"), None)
     
-    # Metrics
     metrics = cve.get("metrics", {})
     cvss_v3_score = None
     severity = None
     
-    # v0.2 Fields
     attack_vector = None
     privileges_required = None
     user_interaction = None
@@ -118,7 +174,6 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
         cvss_data = metrics["cvssMetricV2"][0]["cvssData"]
         cvss_v2_score = cvss_data.get("baseScore")
         
-    # CWEs
     cwe_ids = []
     weaknesses = cve.get("weaknesses", [])
     for w in weaknesses:
@@ -128,17 +183,14 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
                 if val and val.startswith("CWE-"):
                     cwe_ids.append(val)
     
-    # Dates
     published = cve.get("published")
     last_modified = cve.get("lastModified")
     
     publish_date = datetime.fromisoformat(published) if published else None
     update_date = datetime.fromisoformat(last_modified) if last_modified else None
     
-    # References
     references = [ref.get("url") for ref in cve.get("references", [])]
     
-    # Vendors/Products
     vendors = set()
     products = set()
     
@@ -150,8 +202,6 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
             for match in cpe_matches:
                 criteria = match.get("criteria")
                 if criteria:
-                    # Parse CPE 2.3 string
-                    # cpe:2.3:part:vendor:product:version:...
                     parts = criteria.split(":")
                     if len(parts) >= 5:
                         vendor = parts[3]
@@ -164,7 +214,6 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
     vendors = list(vendors)
     products = list(products)
     
-    # v0.5 PoC Extraction
     poc_sources = []
     exploit_exists = False
     
@@ -185,12 +234,11 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
     poc_sources = list(set(poc_sources)) if poc_sources else None
     poc_risk_label = "unknown" if exploit_exists else None
 
-    # Extra
     extra = {"nvd_raw": cve}
     
     return NormalizedCVE(
         cve_id=cve_id,
-        title=cve_id, # NVD doesn't have a separate title usually
+        title=cve_id,
         description=description,
         severity=severity,
         cvss_v2_score=cvss_v2_score,
@@ -201,7 +249,6 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
         products=products,
         references=references,
         extra=extra,
-        # v0.2 Fields
         cwe_ids=cwe_ids,
         attack_vector=attack_vector,
         privileges_required=privileges_required,
@@ -209,9 +256,8 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
         confidentiality_impact=confidentiality_impact,
         integrity_impact=integrity_impact,
         availability_impact=availability_impact,
-        is_in_kev=False, # NVD doesn't explicitly say this, we rely on CISA collector or merge logic
+        is_in_kev=False,
         exploit_exists=exploit_exists,
-        # v0.5 Fields
         poc_sources=poc_sources,
         poc_risk_label=poc_risk_label,
         feed_version=datetime.now().isoformat()
@@ -221,11 +267,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--since", help="Start date (ISO 8601), e.g. 2025-11-01")
     parser.add_argument("--api-key", help="NVD API Key")
+    parser.add_argument("--cve-id", help="Specific CVE ID to fetch")
     args = parser.parse_args()
     
-    since = args.since
-    if not since:
-        # Default to 7 days ago
-        since = (datetime.now() - timedelta(days=7)).date().isoformat()
-        
-    fetch_nvd_cves(since, args.api_key)
+    if args.cve_id:
+        fetch_nvd_cves(cve_id=args.cve_id, api_key=args.api_key)
+    else:
+        since = args.since
+        if not since:
+            since = (datetime.now() - timedelta(days=7)).date().isoformat()
+            
+        fetch_nvd_cves(since=since, api_key=args.api_key)
