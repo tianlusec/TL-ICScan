@@ -1,197 +1,33 @@
-#  (Changelog)
+﻿# 更新日志 (Changelog)
 
- TL-ICScan 
-
- [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)
- [](https://semver.org/lang/zh-CN/)
-
----
+本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 和 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
 ## [0.6.0] - 2025-12-11
 
-### 
+### 新特性
+- **统一配置管理**: 新增 `config.py` 模块，支持环境变量配置
+- **统一日志系统**: 所有模块使用标准 logging 模块，支持日志级别控制
+- **错误码体系**: 新增统一的错误码定义（E001-E999），便于问题排查
+- **改进的配置示例**: `watchlist.yml` 包含4个详细示例和完整字段说明
+- **单元测试**: 新增采集器单元测试，提高代码可靠性
+- **Docker 支持**: 新增 `Dockerfile` 和 `docker-compose.yml`，支持一键部署
 
-- ****:  [`config.py`](../tianlu_intel_collectors/tianlu_intel_collectors/config.py) 
-  -  API 
-  - 
-  - 
+### Bug修复
+- 修复时区处理不一致问题（统一使用UTC）
+- 修复内存增长风险（添加单个值10KB限制）
+- 修复NVD数据采集断点续传机制
+- 修复GitHub API速率限制处理
+- 修复CSV导出注入防护
+- 修复数据库连接管理问题
 
-- ****:  Python logging 
-  -  `LOG_LEVEL` 
-  - 
-  - 
+### 性能优化
+- 优化批量提交大小（从100提升到500）
+- 添加数据库复合索引，提升查询性能
+- 改进缓存策略，支持环境变量配置TTL
 
-- ****: E001-E999
-  - E001-E099: 
-  - E100-E199: 
-  - E200-E299: 
-  - E300-E399: 
-  - E400-E499: 
-  - 
-
-- ****: [`watchlist.yml`](../watchlist.yml) 
-  - 4
-  - 
-  - 
-
-- ****: 
-  - 
-  - 
-
-### Bug 
-
-- ****: 
-  -  UTC 
-  - 
-  - 
-
-- ****: 
-  -  10KB 
-  - 
-  - 
-
-- **NVD **: 
-  - 
-  - 
-  -  API 
-
-- **GitHub API**: 
-  -  API 
-  - 
-  - 
-
-- **CSV **: 
-  -  CSV 
-  - 
-  - 
-
-- ****: 
-  - 
-  - 
-  - 
-
-### 
-
-- ****:  100  500
-  - 
-  - 
-
-- ****: 
-  - 
-  - 
-  - 
-
-- ****: 
-  -  TTL
-  - 
-  - 
-
-### 
-
-- Rust 1.70+, Python 3.8+
-- Windows/Linux/macOS
-- 
-- 
-- 
-
-### 
-
-- 
-- 
-- 
-- 
-
----
-
-## [0.5.0] - 2024-11-15
-
-### 
-
--  GitHub PoC 
--  Exploit-DB 
--  PoC 
-- 
-
-### Bug 
-
--  EPSS 
--  MSRC 
-- 
-
-### 
-
-- 
-- 
-
----
-
-## [0.4.0] - 2024-10-01
-
-### 
-
--  Watchlist 
--  Digest 
--  Markdown 
-- 
-
-### 
-
--  Watchlist 
--  CLI 
-
----
-
-## [0.3.0] - 2024-08-15
-
-### 
-
--  MSRC 
--  EPSS 
-- 
-- 
-
-### Bug 
-
-- 
--  CPE 
-
----
-
-## [0.2.0] - 2024-06-01
-
-### 
-
--  CVE CWECVSS 
-- 
--  JSON/CSV 
--  CISA KEV 
-
-### 
-
-- 
-- 
-
----
-
-## [0.1.0] - 2024-04-01
-
-### 
-
-- 
--  NVD 
-- NormalizedCVE
--  Rust 
--  CLI init-db, ingest, list, show
--  SQLite 
-
----
-
-## 
-
-- ** (Major)**:  API 
-- ** (Minor)**: 
-- ** (Patch)**: 
-
-## 
-
- Issue  Pull Request [CONTRIBUTING.md](../CONTRIBUTING.md)
+### 文档改进
+- 添加详细的版本要求说明
+- 完善操作系统支持列表
+- 改进配置文件错误提示
+- 更新贡献指南
+- 移除所有文档中的 Emoji，保持专业风格
