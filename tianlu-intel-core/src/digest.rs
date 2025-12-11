@@ -31,14 +31,18 @@ fn severity_to_rank(sev: &str) -> i32 {
 fn parse_since_date(since: &str) -> String {
     if since.ends_with('d') {
         if let Ok(days) = since.trim_end_matches('d').parse::<i64>() {
-             let date = chrono::Local::now() - chrono::Duration::days(days);
-             return date.format("%Y-%m-%d").to_string();
+             if days > 0 && days <= 365 {
+                 let date = chrono::Local::now() - chrono::Duration::days(days);
+                 return date.format("%Y-%m-%d").to_string();
+             }
         }
     }
     if since.ends_with('w') {
         if let Ok(weeks) = since.trim_end_matches('w').parse::<i64>() {
-             let date = chrono::Local::now() - chrono::Duration::weeks(weeks);
-             return date.format("%Y-%m-%d").to_string();
+             if weeks > 0 && weeks <= 52 {
+                 let date = chrono::Local::now() - chrono::Duration::weeks(weeks);
+                 return date.format("%Y-%m-%d").to_string();
+             }
         }
     }
     since.to_string()
@@ -50,7 +54,7 @@ pub async fn generate_digest(db_path: &str, config_path: &str, since: &str, cve_
     let config_content = fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config file: {}", config_path))?;
     let config: WatchlistConfig = serde_yaml::from_str(&config_content)
-        .with_context(|| "Failed to parse YAML config")?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse YAML config at {}: {}", config_path, e))?;
 
     let parsed_since = parse_since_date(since);
 

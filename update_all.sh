@@ -14,7 +14,7 @@ fi
 
 # 2. Update NVD
 echo "Updating NVD..."
-python -m tianlu_intel_collectors.nvd --since 2025-11-01 \
+python -m tianlu_intel_collectors.nvd --since 90d \
   | "$RUST_BIN" ingest --source nvd --db "$DB_PATH"
 
 # 3. Update CISA KEV

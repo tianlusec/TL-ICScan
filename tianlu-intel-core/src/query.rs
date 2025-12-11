@@ -72,12 +72,13 @@ pub async fn list_cves(
         qb.push_bind(sev);
     }
     if let Some(kw) = &keyword {
-        let pattern = format!("%{}%", kw);
+        let escaped_kw = kw.replace("%", "\\%").replace("_", "\\_");
+        let pattern = format!("%{}%", escaped_kw);
         qb.push(" AND (title LIKE ");
         qb.push_bind(pattern.clone());
-        qb.push(" OR description LIKE ");
+        qb.push(" ESCAPE '\\' OR description LIKE ");
         qb.push_bind(pattern);
-        qb.push(")");
+        qb.push(" ESCAPE '\\')");
     }
     if let Some(c) = &cwe {
         qb.push(" AND cwe_ids LIKE ");
@@ -207,6 +208,17 @@ pub async fn show_cve(db_path: &str, cve_id: &str) -> Result<()> {
     Ok(())
 }
 
+fn sanitize_csv_field(field: &str) -> String {
+    let mut s = field.to_string();
+    // Escape potential formula injection characters
+    if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        s.insert(0, '\'');
+    }
+    // Replace newlines and other control characters to prevent CSV structure breakage
+    s = s.replace('\n', " ").replace('\r', " ");
+    s
+}
+
 pub async fn export_cves(
     db_path: &str,
     format: ExportFormat,
@@ -236,23 +248,20 @@ pub async fn export_cves(
             println!("{}", json);
         }
         ExportFormat::Csv => {
-            println!("cve_id,severity,cvss_v3_score,epss_score,publish_date,title");
+            let mut wtr = csv::Writer::from_writer(std::io::stdout());
+            wtr.write_record(&["cve_id", "severity", "cvss_v3_score", "epss_score", "publish_date", "title"])?;
+
             for row in rows {
-                let mut title = row.title.unwrap_or_default();
-                if title.starts_with('=') || title.starts_with('+') || title.starts_with('-') || title.starts_with('@') {
-                    title.insert(0, '\'');
-                }
-                
-                println!(
-                    "{},{},{},{},{},\"{}\"",
-                    row.cve_id,
-                    row.severity.unwrap_or_default(),
-                    row.cvss_v3_score.unwrap_or(0.0),
-                    row.epss_score.unwrap_or(0.0),
-                    row.publish_date.unwrap_or_default(),
-                    title.replace("\"", "\"\"")
-                );
+                wtr.write_record(&[
+                    sanitize_csv_field(&row.cve_id),
+                    sanitize_csv_field(&row.severity.unwrap_or_default()),
+                    row.cvss_v3_score.unwrap_or(0.0).to_string(),
+                    row.epss_score.unwrap_or(0.0).to_string(),
+                    sanitize_csv_field(&row.publish_date.unwrap_or_default()),
+                    sanitize_csv_field(&row.title.unwrap_or_default()),
+                ])?;
             }
+            wtr.flush()?;
         }
     }
 

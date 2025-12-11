@@ -3,6 +3,7 @@ mod db;
 mod ingest;
 mod query;
 mod digest;
+mod errors;
 
 use clap::Parser;
 use cli::{Cli, Commands};

@@ -3,16 +3,28 @@ import json
 import sys
 import time
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .models import NormalizedCVE
-from .utils import get_session
+from .utils import get_session, get_logger, measure_time
+from . import config
 import re
+
+logger = get_logger(__name__)
 
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
+@measure_time
 def fetch_nvd_cves(since: Optional[str] = None, api_key: Optional[str] = None, cve_id: Optional[str] = None):
+    """
+    Fetch CVEs from NVD API.
+
+    Args:
+        since (Optional[str]): Start date for fetching CVEs. Can be an ISO format date string or relative days (e.g., '7d').
+        api_key (Optional[str]): NVD API Key. If not provided, tries to load from NVD_API_KEY env var.
+        cve_id (Optional[str]): Specific CVE ID to fetch. If provided, 'since' is ignored.
+    """
     session = get_session()
     
     final_api_key = api_key or os.environ.get("NVD_API_KEY")
@@ -21,59 +33,115 @@ def fetch_nvd_cves(since: Optional[str] = None, api_key: Optional[str] = None, c
         session.headers.update({"apiKey": final_api_key})
         sleep_time = 0.6
     else:
-        sys.stderr.write("Warning: No NVD API Key provided (via arg or NVD_API_KEY env var). Using strict rate limits.\n")
+        logger.warning("No NVD API Key provided (via arg or NVD_API_KEY env var). Using strict rate limits.")
         sleep_time = 6.0
 
     if cve_id:
-        sys.stderr.write(f"Fetching specific CVE: {cve_id}...\n")
+        logger.info(f"Fetching specific CVE: {cve_id}...")
         fetch_nvd_single(session, cve_id, sleep_time)
         return
 
-    start_date = datetime.now() - timedelta(days=7)
-    if since:
-        try:
-            start_date = datetime.fromisoformat(since)
-        except ValueError:
-            sys.stderr.write(f"Invalid date format: {since}\n")
-            return
+    start_date = datetime.now(timezone.utc) - timedelta(days=7)
+    state_file = "nvd_state.json"
 
-    end_date = datetime.now()
+    if since:
+        if since.endswith('d'):
+            try:
+                days = int(since[:-1])
+                start_date = datetime.now(timezone.utc) - timedelta(days=days)
+            except ValueError:
+                sys.stderr.write(f"Invalid relative date format: {since}\n")
+                return
+        else:
+            try:
+                start_date = datetime.fromisoformat(since)
+            except ValueError:
+                sys.stderr.write(f"Invalid date format: {since}\n")
+                return
+    elif os.path.exists(state_file):
+        try:
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+                if "last_success" in state:
+                    start_date = datetime.fromisoformat(state["last_success"])
+                    logger.info(f"Resuming from checkpoint: {start_date}")
+        except Exception as e:
+            logger.error(f"Failed to load checkpoint: {e}")
+
+    end_date = datetime.now(timezone.utc)
     
+    CHUNK_DAYS = config.NVD_CHUNK_DAYS
     current_start = start_date
     while current_start < end_date:
-        current_end = current_start + timedelta(days=120)
+        current_end = current_start + timedelta(days=CHUNK_DAYS)
         if current_end > end_date:
             current_end = end_date
             
-        sys.stderr.write(f"Fetching NVD data from {current_start.date()} to {current_end.date()}...\n")
-        fetch_nvd_chunk(session, current_start, current_end, sleep_time)
+        logger.info(f"Fetching NVD data from {current_start.date()} to {current_end.date()}...")
+        try:
+            fetch_nvd_chunk(session, current_start, current_end, sleep_time)
+            with open(state_file, 'w') as f:
+                json.dump({"last_success": current_end.isoformat()}, f)
+        except Exception as e:
+            logger.error(f"Error in chunk {current_start} - {current_end}: {e}")
+            raise
         
         current_start = current_end
 
 def fetch_nvd_single(session, cve_id, sleep_time):
+    """
+    Fetch a single CVE from NVD API.
+
+    Args:
+        session (requests.Session): HTTP session to use for requests.
+        cve_id (str): The CVE ID to fetch.
+        sleep_time (float): Time to sleep between requests to respect rate limits.
+    """
     params = {
         "cveId": cve_id
     }
-    try:
-        response = session.get(NVD_API_URL, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        vulnerabilities = data.get("vulnerabilities", [])
-        for item in vulnerabilities:
-            cve_item = item.get("cve", {})
-            try:
-                normalized = parse_nvd_cve(cve_item)
-                print(normalized.model_dump_json())
-            except Exception as e:
-                sys.stderr.write(f"Error parsing CVE: {e}\n")
-        
-        time.sleep(sleep_time)
-        
-    except Exception as e:
-        sys.stderr.write(f"Error fetching NVD data: {e}\n")
+    
+    for attempt in range(3):
+        try:
+            response = session.get(NVD_API_URL, params=params, timeout=30)
+            
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 30))
+                logger.warning(f"NVD API Rate Limit (429). Sleeping for {retry_after} seconds.")
+                time.sleep(retry_after)
+                continue
+
+            response.raise_for_status()
+            data = response.json()
+            
+            vulnerabilities = data.get("vulnerabilities", [])
+            for item in vulnerabilities:
+                cve_item = item.get("cve", {})
+                try:
+                    normalized = parse_nvd_cve(cve_item)
+                    print(normalized.model_dump_json())
+                except Exception as e:
+                    logger.error(f"Error parsing CVE: {e}")
+            
+            time.sleep(sleep_time)
+            return
+
+        except Exception as e:
+            logger.error(f"Error fetching NVD data (attempt {attempt+1}/3): {e}")
+            time.sleep(sleep_time * (attempt + 1))
+    
+    logger.error(f"Failed to fetch NVD data for {cve_id} after 3 attempts.")
 
 def fetch_nvd_chunk(session, start_dt, end_dt, sleep_time):
+    """
+    Fetch a chunk of CVEs from NVD API based on publication date range.
+
+    Args:
+        session (requests.Session): HTTP session.
+        start_dt (datetime): Start datetime.
+        end_dt (datetime): End datetime.
+        sleep_time (float): Sleep time between requests.
+    """
     params = {
         "resultsPerPage": 2000,
         "startIndex": 0,
@@ -82,33 +150,40 @@ def fetch_nvd_chunk(session, start_dt, end_dt, sleep_time):
     }
 
     loop_count = 0
-    MAX_PAGES = 250
+    MAX_PAGES = config.NVD_MAX_PAGES
 
     while True:
         loop_count += 1
         if loop_count > MAX_PAGES:
-            sys.stderr.write("NVD fetch aborted: exceeded max page iterations.\n")
+            logger.error("NVD fetch aborted: exceeded max page iterations.")
             break
 
         success = False
         for attempt in range(3):
             try:
                 response = session.get(NVD_API_URL, params=params, timeout=30)
+                
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 30))
+                    logger.warning(f"NVD API Rate Limit (429). Sleeping for {retry_after} seconds.")
+                    time.sleep(retry_after)
+                    continue
+                
                 response.raise_for_status()
                 data = response.json()
                 success = True
                 break
             except Exception as e:
-                sys.stderr.write(f"Error fetching NVD data (attempt {attempt+1}/3): {e}\n")
+                logger.error(f"Error fetching NVD data (attempt {attempt+1}/3): {e}")
                 time.sleep(sleep_time * (attempt + 1) * 2)
 
         if not success:
-            sys.stderr.write(f"Failed to fetch chunk starting at {params['startIndex']} after 3 attempts. Aborting to prevent data gap.\n")
+            logger.error(f"Failed to fetch chunk starting at {params['startIndex']} after 3 attempts. Aborting to prevent data gap.")
             raise RuntimeError(f"NVD fetch failed for chunk {start_dt} - {end_dt}")
 
         vulnerabilities = data.get("vulnerabilities", [])
         if not vulnerabilities:
-            sys.stderr.write(f"Warning: Received empty vulnerabilities list at index {params['startIndex']}. Stopping chunk fetch.\n")
+            logger.warning(f"Warning: Received empty vulnerabilities list at index {params['startIndex']}. Stopping chunk fetch.")
             break
 
         for item in vulnerabilities:
@@ -119,9 +194,9 @@ def fetch_nvd_chunk(session, start_dt, end_dt, sleep_time):
                     if re.match(r'^CVE-\d{4}-\d{4,}$', normalized.cve_id or ''):
                         print(normalized.model_dump_json())
                     else:
-                        sys.stderr.write(f"Skipping invalid CVE id: {normalized.cve_id}\n")
+                        logger.warning(f"Skipping invalid CVE id: {normalized.cve_id}")
             except Exception as e:
-                sys.stderr.write(f"Error parsing CVE: {e}\n")
+                logger.error(f"Error parsing CVE: {e}")
 
         total_results = data.get("totalResults", 0)
         start_index = data.get("startIndex", 0)
@@ -137,6 +212,15 @@ def fetch_nvd_chunk(session, start_dt, end_dt, sleep_time):
         time.sleep(sleep_time)
 
 def parse_nvd_cve(cve: dict) -> NormalizedCVE:
+    """
+    Parse a raw NVD CVE dictionary into a NormalizedCVE object.
+
+    Args:
+        cve (dict): The raw CVE dictionary from NVD API.
+
+    Returns:
+        NormalizedCVE: The normalized CVE object.
+    """
     cve_id = cve.get("id")
     
     descriptions = cve.get("descriptions", [])
@@ -186,8 +270,19 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
     published = cve.get("published")
     last_modified = cve.get("lastModified")
     
-    publish_date = datetime.fromisoformat(published) if published else None
-    update_date = datetime.fromisoformat(last_modified) if last_modified else None
+    def parse_dt(dt_str):
+        if not dt_str: return None
+        try:
+            dt = datetime.fromisoformat(dt_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError as e:
+            logger.warning(f"Warning: Failed to parse date '{dt_str}': {e}")
+            return None
+
+    publish_date = parse_dt(published)
+    update_date = parse_dt(last_modified)
     
     references = [ref.get("url") for ref in cve.get("references", [])]
     
@@ -260,7 +355,7 @@ def parse_nvd_cve(cve: dict) -> NormalizedCVE:
         exploit_exists=exploit_exists,
         poc_sources=poc_sources,
         poc_risk_label=poc_risk_label,
-        feed_version=datetime.now().isoformat()
+        feed_version=datetime.now(timezone.utc).isoformat()
     )
 
 if __name__ == "__main__":

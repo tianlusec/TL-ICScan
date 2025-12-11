@@ -1,23 +1,22 @@
 import argparse
 import json
 import sys
+import time
 import requests
 import xml.etree.ElementTree as ET
-try:
-    from defusedxml import ElementTree as DefusedET
-    _DEFUSEDXML_AVAILABLE = True
-except Exception:
-    DefusedET = None
-    _DEFUSEDXML_AVAILABLE = False
+from defusedxml import ElementTree as DefusedET
 from datetime import datetime
 from typing import Optional, List, Dict
 
 from .models import NormalizedCVE
-from .utils import get_session
+from .utils import get_session, get_logger, measure_time
+
+logger = get_logger(__name__)
 
 MSRC_API_UPDATES = "https://api.msrc.microsoft.com/cvrf/v2.0/updates"
 MSRC_API_CVRF_BASE = "https://api.msrc.microsoft.com/cvrf/v2.0/cvrf"
 
+@measure_time
 def fetch_msrc_cves(month: Optional[str] = None):
     """
     Fetch MSRC CVEs.
@@ -37,12 +36,12 @@ def fetch_msrc_cves(month: Optional[str] = None):
                     target_update = up
                     break
             if not target_update:
-                sys.stderr.write(f"Update for month {month} not found.\n")
+                logger.warning(f"Update for month {month} not found.")
                 return
         else:
             updates_list = updates.get("value", [])
             if not updates_list:
-                sys.stderr.write("No updates found from MSRC.\n")
+                logger.warning("No updates found from MSRC.")
                 return
             updates_list.sort(key=lambda x: x.get("InitialReleaseDate", ""), reverse=True)
             target_update = updates_list[0]
@@ -51,43 +50,42 @@ def fetch_msrc_cves(month: Optional[str] = None):
         if not cvrf_url:
             cvrf_url = f"{MSRC_API_CVRF_BASE}/{target_update['ID']}"
             
-        sys.stderr.write(f"Fetching MSRC CVRF from: {cvrf_url}\n")
+        logger.info(f"Fetching MSRC CVRF from: {cvrf_url}")
         
-        resp = session.get(cvrf_url, timeout=60)
-        resp.raise_for_status()
+        resp = None
+        for attempt in range(3):
+            try:
+                resp = session.get(cvrf_url, timeout=60)
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                logger.error(f"Error fetching MSRC CVRF (attempt {attempt+1}/3): {e}")
+                if attempt < 2:
+                    time.sleep(5)
+                else:
+                    logger.error("Failed to fetch MSRC CVRF after 3 attempts.")
+                    return
 
         MAX_BYTES = 50 * 1024 * 1024
         content_length = resp.headers.get("Content-Length")
         if content_length:
             try:
                 if int(content_length) > MAX_BYTES:
-                    sys.stderr.write("MSRC CVRF too large, rejecting to avoid OOM.\n")
+                    logger.error("MSRC CVRF too large, rejecting to avoid OOM.")
                     return
             except Exception:
                 pass
 
         content = resp.text
         if len(content.encode('utf-8')) > MAX_BYTES:
-            sys.stderr.write("MSRC CVRF content exceeds size limit, rejecting.\n")
+            logger.error("MSRC CVRF content exceeds size limit, rejecting.")
             return
         
-        if not _DEFUSEDXML_AVAILABLE:
-            if "<!DOCTYPE" in content or "<!ENTITY" in content:
-                 sys.stderr.write("Security Warning: MSRC response contains DOCTYPE/ENTITY, rejecting to prevent XXE.\n")
-                 return
-
-        if _DEFUSEDXML_AVAILABLE:
-            try:
-                root = DefusedET.fromstring(content)
-            except Exception as e:
-                sys.stderr.write(f"Error parsing MSRC XML (defusedxml): {e}\n")
-                return
-        else:
-            try:
-                root = ET.fromstring(content)
-            except Exception as e:
-                sys.stderr.write(f"Error parsing MSRC XML: {e}\n")
-                return
+        try:
+            root = DefusedET.fromstring(content)
+        except Exception as e:
+            logger.error(f"Error parsing MSRC XML (defusedxml): {e}")
+            return
         
         ns = {'cvrf': 'http://www.icasi.org/CVRF/schema/cvrf/1.1',
               'vuln': 'http://www.icasi.org/CVRF/schema/vuln/1.1',
@@ -99,10 +97,10 @@ def fetch_msrc_cves(month: Optional[str] = None):
                 if normalized:
                     print(normalized.model_dump_json())
             except Exception as e:
-                sys.stderr.write(f"Error parsing MSRC vuln: {e}\n")
+                logger.error(f"Error parsing MSRC vuln: {e}")
                 
     except Exception as e:
-        sys.stderr.write(f"Error fetching MSRC data: {e}\n")
+        logger.error(f"Error fetching MSRC data: {e}")
 
 def parse_msrc_vuln(vuln: ET.Element, ns: Dict) -> Optional[NormalizedCVE]:
     title_elem = vuln.find('vuln:Title', ns)

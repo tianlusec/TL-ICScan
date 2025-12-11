@@ -6,8 +6,10 @@ import re
 import time
 import argparse
 from datetime import datetime, timedelta
-from .utils import get_session
+from .utils import get_session, get_logger, measure_time
 from typing import List, Dict, Any
+
+logger = get_logger(__name__)
 
 GITHUB_API_URL = "https://api.github.com/search/repositories"
 
@@ -20,6 +22,7 @@ def get_github_headers():
         headers["Authorization"] = f"token {token}"
     return headers
 
+@measure_time
 def search_github_pocs(since_date: datetime, keywords: List[str] = None):
     """
     Search GitHub for repositories related to CVEs.
@@ -40,9 +43,12 @@ def search_github_pocs(since_date: datetime, keywords: List[str] = None):
     session = get_session()
     page = 1
     max_pages = 50
+    consecutive_errors = 0
+    MAX_RETRIES = 5
+
     while True:
         if page > max_pages:
-            sys.stderr.write("Aborting GitHub search: exceeded maximum pages.\n")
+            logger.warning("Aborting GitHub search: exceeded maximum pages.")
             break
 
         params = {
@@ -57,24 +63,30 @@ def search_github_pocs(since_date: datetime, keywords: List[str] = None):
             response = session.get(GITHUB_API_URL, headers=get_github_headers(), params=params, timeout=30)
 
             if response.status_code == 403:
+                consecutive_errors += 1
+                if consecutive_errors > MAX_RETRIES:
+                    logger.error("Max retries exceeded for GitHub API 403.")
+                    break
+
                 reset_time = response.headers.get("X-RateLimit-Reset")
                 if reset_time:
                     sleep_seconds = int(reset_time) - int(time.time()) + 5
                     if sleep_seconds > 0:
-                        sys.stderr.write(f"Rate limit exceeded. Sleeping for {sleep_seconds} seconds...\n")
+                        logger.warning(f"Rate limit exceeded. Sleeping for {sleep_seconds} seconds...")
                         time.sleep(sleep_seconds)
                         continue
 
-                sys.stderr.write("Error: GitHub API rate limit exceeded and no reset time found.\n")
-                time.sleep(60)
-                sys.stderr.write("Aborting search to prevent IP ban.\n")
-                break
-
+                logger.error("Error: GitHub API rate limit exceeded and no reset time found.")
+                time.sleep(300)
+                logger.info("Retrying after 5 minutes wait...")
+                continue
+            
+            consecutive_errors = 0
             response.raise_for_status()
             try:
                 data = response.json()
             except Exception:
-                sys.stderr.write("Error decoding GitHub response as JSON.\n")
+                logger.error("Error decoding GitHub response as JSON.")
                 break
 
             items = data.get("items", [])
@@ -85,20 +97,37 @@ def search_github_pocs(since_date: datetime, keywords: List[str] = None):
                 process_repo_item(item)
 
             page += 1
-            if page > 10:
-                break
 
             time.sleep(2.0)
 
         except Exception as e:
-            sys.stderr.write(f"Error searching GitHub: {e}\n")
+            logger.error(f"Error searching GitHub: {e}")
             time.sleep(5)
 
+CVE_PATTERN = re.compile(r'(CVE-\d{4}-\d{4,})', re.IGNORECASE | re.ASCII)
+
 def extract_cve_ids(text: str) -> List[str]:
-    """Extract CVE IDs from text using regex."""
+    """Extract CVE IDs from text using regex and validate year."""
     if not text:
         return []
-    return re.findall(r'(CVE-\d{4}-\d{4,})', text, re.IGNORECASE | re.ASCII)
+    
+    candidates = CVE_PATTERN.findall(text)
+    valid_cves = []
+    
+    current_year = datetime.now().year
+    
+    for cve in candidates:
+        parts = cve.split('-')
+        if len(parts) >= 2:
+            try:
+                year = int(parts[1])
+                # Validate year range (1999 to current year)
+                if 1999 <= year <= current_year:
+                    valid_cves.append(cve)
+            except ValueError:
+                continue
+                
+    return valid_cves
 
 def process_repo_item(item: Dict[str, Any]):
     """
@@ -153,7 +182,7 @@ def main():
         try:
             since_date = datetime.strptime(args.since, "%Y-%m-%d")
         except ValueError:
-            sys.stderr.write(f"Invalid date format: {args.since}. Using 7d ago.\n")
+            logger.warning(f"Invalid date format: {args.since}. Using 7d ago.")
             since_date = datetime.now() - timedelta(days=7)
 
     search_github_pocs(since_date, args.keywords)

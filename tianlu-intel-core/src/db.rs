@@ -6,12 +6,12 @@ use std::path::Path;
 pub async fn connect(db_path: &str) -> Result<Pool<Sqlite>> {
     let db_url = format!("sqlite:{}", db_path);
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
+        .max_connections(20)
         .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(&db_url)
         .await?;
     
-    sqlx::query("PRAGMA busy_timeout = 30000;")
+    sqlx::query("PRAGMA busy_timeout = 60000;")
         .execute(&pool)
         .await?;
 
@@ -64,6 +64,8 @@ pub async fn init_db(db_path: &str) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_publish_date ON cve_records(publish_date);
         CREATE INDEX IF NOT EXISTS idx_severity ON cve_records(severity);
         CREATE INDEX IF NOT EXISTS idx_is_in_kev ON cve_records(is_in_kev);
+        CREATE INDEX IF NOT EXISTS idx_severity_publish ON cve_records(severity, publish_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_cvss_publish ON cve_records(cvss_v3_score DESC, publish_date DESC);
         "#
     )
     .execute(&pool)

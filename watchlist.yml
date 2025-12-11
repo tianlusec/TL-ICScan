@@ -1,3 +1,31 @@
+# TL-ICScan Watchlist Configuration
+# 
+# This file defines the criteria for the vulnerability digest generation.
+# You can define multiple items to track different technologies, vendors, or keywords.
+
+# Example 1: Track high-profile verified exploits
 - name: recent_verified_exploits
   keywords: ["Exploit-DB"]
+  # Optional: Filter by severity (LOW, MEDIUM, HIGH, CRITICAL)
+  # severity: CRITICAL 
+
+# Example 2: Track specific vendors
+- name: microsoft_critical
+  keywords: ["Microsoft", "Windows"]
+  severity: CRITICAL
+
+# Example 3: Track VPN and Network Devices (High Risk)
+- name: vpn_devices
+  keywords: ["Pulse Secure", "Fortinet", "Citrix", "Cisco AnyConnect"]
+  severity: HIGH
+
+# Example 4: Web Server Technologies
+- name: web_servers
+  keywords: ["Apache", "Nginx", "Tomcat", "WebLogic"]
+  
+# Configuration Fields:
+# - name: (Required) The title of the section in the digest.
+# - keywords: (Required) List of strings to search for in the vulnerability description or title.
+# - severity: (Optional) Minimum severity level to include.
+# - cwe: (Optional) List of CWE IDs to filter by (e.g., ["CWE-79", "CWE-89"]).
 

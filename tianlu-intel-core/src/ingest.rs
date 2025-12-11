@@ -9,6 +9,8 @@ use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
+const BATCH_SIZE: usize = 500;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NormalizedCVE {
     pub cve_id: String,
@@ -58,6 +60,18 @@ pub async fn ingest_data(db_path: &str, source: &str) -> Result<()> {
         .map(|p| p.parent().unwrap_or(Path::new(".")).join("ingest_errors.log"))
         .unwrap_or_else(|_| PathBuf::from("ingest_errors.log"));
 
+    // Log rotation: if > 5MB, rename to .old
+    if let Ok(metadata) = std::fs::metadata(&log_path) {
+        if metadata.len() > 5 * 1024 * 1024 {
+            let old_path = log_path.with_extension("log.old");
+            // Remove old log if exists to ensure rename succeeds (especially on Windows)
+            if old_path.exists() {
+                let _ = std::fs::remove_file(&old_path);
+            }
+            let _ = std::fs::rename(&log_path, old_path);
+        }
+    }
+
     let mut error_log = OpenOptions::new()
         .create(true)
         .append(true)
@@ -76,7 +90,7 @@ pub async fn ingest_data(db_path: &str, source: &str) -> Result<()> {
         let mut new_cve: NormalizedCVE = match serde_json::from_str(&line) {
             Ok(v) => v,
             Err(e) => {
-                let err_msg = format!("Failed to parse JSON line: {} | Line content: {}\n", e, line);
+                let err_msg = format!("Failed to parse JSON line: {}\n", e);
                 eprint!("{}", err_msg);
                 if let Some(ref mut log) = error_log {
                     let _ = log.write_all(err_msg.as_bytes());
@@ -218,12 +232,23 @@ pub async fn ingest_data(db_path: &str, source: &str) -> Result<()> {
             };
 
             if let (Some(old_map), Some(new_map)) = (final_extra.as_object_mut(), new_cve.extra.as_object()) {
+                if old_map.len() > 50 {
+                    // Prevent unbounded growth
+                    old_map.clear();
+                }
                 for (k, v) in new_map {
+                    // Limit individual value size to 10KB
+                    if v.to_string().len() > 10240 {
+                        continue;
+                    }
                     old_map.insert(k.clone(), v.clone());
                 }
             }
 
-            let raw_data = serde_json::to_string(&final_extra).unwrap_or_default();
+            let mut raw_data = serde_json::to_string(&final_extra).unwrap_or_default();
+            if raw_data.len() > 5 * 1024 * 1024 {
+                raw_data = "{}".to_string();
+            }
 
             sqlx::query(
                     r#"
@@ -341,7 +366,7 @@ pub async fn ingest_data(db_path: &str, source: &str) -> Result<()> {
         }
 
         count += 1;
-        if count % 1000 == 0 {
+        if count % BATCH_SIZE == 0 {
             tx.commit().await?;
             tx = pool.begin().await?;
         }

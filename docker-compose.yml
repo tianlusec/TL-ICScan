@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    image: tl-icscan:latest
+    container_name: tl-icscan-web
+    ports:
+      - "8501:8501"
+    volumes:
+      - tl_data:/data
+      - ./watchlist.yml:/app/watchlist.yml:ro
+    environment:
+      - TIANLU_DB_PATH=/data/tianlu_intel_v2.db
+      # - NVD_API_KEY=your_key_here
+      # - GITHUB_TOKEN=your_token_here
+    restart: unless-stopped
+
+  # Optional: Service to run updates periodically or manually
+  updater:
+    build: .
+    image: tl-icscan:latest
+    container_name: tl-icscan-updater
+    volumes:
+      - tl_data:/data
+      - ./watchlist.yml:/app/watchlist.yml:ro
+    environment:
+      - TIANLU_DB_PATH=/data/tianlu_intel_v2.db
+      # - NVD_API_KEY=your_key_here
+      # - GITHUB_TOKEN=your_token_here
+    # Override command to run the update script
+    command: update-data
+    # Don't restart automatically as it exits after update
+    restart: "no"
+    profiles:
+      - tools  # Only start when explicitly requested (e.g. docker-compose run updater)
+
+volumes:
+  tl_data:

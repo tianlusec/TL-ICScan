@@ -38,14 +38,25 @@ cmd2 = [rust_bin, "ingest", "--source", args.source, "--db", db_path]
 print(f"Starting ingestion for module={args.module} source={args.source}...")
 try:
     p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE, env=env, cwd=project_root)
+    
+    # Check if p1 started successfully
+    if p1.poll() is not None:
+        print(f"Error: Collector process exited immediately with code {p1.returncode}")
+        sys.exit(1)
+
     p2 = subprocess.Popen(cmd2, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=project_root)
     p1.stdout.close()
     try:
         output, error = p2.communicate(timeout=120)
     except TimeoutExpired:
+        print("Error: Ingestion timed out. Killing processes.")
         p2.kill()
         p1.kill()
         output, error = p2.communicate()
+    finally:
+        # Ensure processes are terminated
+        if p1.poll() is None: p1.kill()
+        if p2.poll() is None: p2.kill()
 
     try:
         p1.wait(timeout=5)

@@ -1,10 +1,55 @@
 # TL-ICScan Vulnerability Intelligence Aggregation and Analysis Tool
 
-> This repository contains the code and collection scripts for TL-ICScan.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Rust 1.70+](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+[![GitHub release](https://img.shields.io/github/v/release/tianlusec/TL-ICScan)](https://github.com/tianlusec/TL-ICScan/releases)
+[![GitHub stars](https://img.shields.io/github/stars/tianlusec/TL-ICScan?style=social)](https://github.com/tianlusec/TL-ICScan)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING_EN.md)
+
+> **Open Source Security Intelligence Tool** | Localized | Multi-source Aggregation | Smart Analysis
 >
-> **TL-ICScan is developed by Tianlu Laboratory.**
+> This repository contains the complete open-source code and collection scripts for TL-ICScan.
+>
+> **TL-ICScan is developed and maintained as open source by Tianlu Laboratory.**
 
 [中文版](README.md) ← Chinese primary
+
+## Latest Update (v0.6.0)
+
+**Release Date**: December 11, 2025
+
+This update includes major improvements and bug fixes:
+
+### New Features
+- **Unified Configuration Management**: New `config.py` module with environment variable support
+- **Unified Logging System**: All modules use standard logging with level control
+- **Error Code System**: Unified error codes (E001-E999) for easier troubleshooting
+- **Improved Configuration Examples**: `watchlist.yml` includes 4 detailed examples with complete field descriptions
+- **Unit Tests**: New collector unit tests for improved reliability
+
+### Bug Fixes
+- Fixed timezone handling inconsistency (unified to UTC)
+- Fixed memory growth risk (added 10KB limit per value)
+- Fixed NVD data collection checkpoint mechanism
+- Fixed GitHub API rate limit handling
+- Fixed CSV export injection protection
+- Fixed database connection management
+
+### Performance Improvements
+- Optimized batch commit size (from 100 to 500)
+- Added database composite indexes for better query performance
+- Improved caching strategy with configurable TTL via environment variables
+
+### Documentation Improvements
+- Added detailed version requirements
+- Completed OS support list
+- Improved configuration file error messages
+- Updated contribution guidelines
+
+For detailed changelog, see [CHANGELOG_EN.md](docs/CHANGELOG_EN.md) | [中文版](docs/CHANGELOG.md)
+
+---
 
 ## Introduction
 
@@ -41,12 +86,36 @@ In daily security operations and research, we face challenges such as fragmented
 
 ## Quick Start
 
-### 1. Prerequisites
+### Method 1: Docker Deployment (Recommended)
+
+No need to install Rust or Python environments. Start everything with Docker.
+
+1. **Start Services**
+   ```bash
+   docker-compose up -d
+   ```
+   Access the Web UI at http://localhost:8501.
+
+2. **Update Data**
+   ```bash
+   # Run a one-time update task
+   docker-compose run --rm updater
+   ```
+
+### Method 2: Source Installation
+
+#### 1. Prerequisites
 
 - **Rust**: For compiling the core tool (`cargo build --release`)
-- **Python 3.8+**: For running collection scripts
+    - **Version Requirement**: Rust 1.70 or higher
+- **Python**: For running collection scripts
+    - **Version Requirement**: Python 3.8 or higher
+- **Supported Operating Systems**:
+    - Windows 10/11 (x64)
+    - Linux (Ubuntu 20.04+, CentOS 7+, Debian 10+)
+    - macOS (Intel/Apple Silicon)
 
-### 2. Installation
+#### 2. Installation
 
 ```bash
 # 1. Build the core tool
@@ -59,14 +128,14 @@ cd ../tianlu_intel_collectors
 pip install -e .
 ```
 
-### 3. Initialization & Update
+#### 3. Initialization & Update
 
 We provide a one-click update script that automatically runs all collectors and imports data into the database (`tianlu_intel_v2.db`).
 
 - **Windows**: Run `update_all.bat`
 - **Linux/macOS**: Run `./update_all.sh`
 
-### 4. Common Commands
+#### 4. Common Commands
 
 All operations are done via the CLI tool (assuming you are in the project root directory):
 
@@ -113,11 +182,86 @@ Customize your intelligence feed by modifying `watchlist.yml`:
 
 ---
 
-## Contributing & Security
+## Contributing & Support
 
-- For contributing code, please refer to [CONTRIBUTING_EN.md](CONTRIBUTING_EN.md)
-- For reporting security issues, please refer to [SECURITY_EN.md](SECURITY_EN.md)
+We warmly welcome all forms of contributions! TL-ICScan is an open-source project that relies on the community to continuously improve.
+
+### How to Contribute
+
+- **Submit Issues**: Report bugs, suggest new features, or share your experience
+- **Submit Pull Requests**: Contribute code, documentation, or test cases
+  - Please read the [Contributing Guide](CONTRIBUTING_EN.md) first to understand development standards
+  - Ensure code passes all tests and follows project style
+- **Improve Documentation**: Help improve docs, add examples, or translate
+- **Report Security Issues**: Responsibly disclose security vulnerabilities, see [Security Policy](SECURITY_EN.md)
+- **Star the Project**: If you find it useful, give us a star to support the project!
+- **Share Feedback**: Share your use cases and suggestions in Discussions
+
+### Contributors
+
+Thanks to all developers who have contributed to TL-ICScan!
+
+<!-- Contributors list will be automatically updated -->
+
+### Open Source License
+
+This project is licensed under the MIT License, which allows you to:
+- Commercial use
+- Modify source code
+- Distribute copies
+- Private use
+
+The only requirement is to retain the original license and copyright notice. See [LICENSE](LICENSE) for details.
+
+## Project Status
+
+- **Development Status**: Actively maintained
+- **Stability**: Production-ready
+- **Test Coverage**: Continuously improving
+- **Documentation**: Complete
+
+## Acknowledgments
+
+Thanks to the following projects and organizations for providing data sources:
+- [NVD](https://nvd.nist.gov/) - National Vulnerability Database
+- [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) - Known Exploited Vulnerabilities
+- [Exploit-DB](https://www.exploit-db.com/) - Exploit Database
+- [EPSS](https://www.first.org/epss/) - Exploit Prediction Scoring System
+- [Microsoft MSRC](https://msrc.microsoft.com/) - Microsoft Security Response Center
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=tianlusec/TL-ICScan&type=Date)](https://star-history.com/#tianlusec/TL-ICScan&Date)
+
+## Contact Us
+
+- **Project Homepage**: [GitHub Repository](https://github.com/tianlusec/TL-ICScan)
+- **Issue Tracker**: [GitHub Issues](https://github.com/tianlusec/TL-ICScan/issues)
+- **Feature Discussions**: [GitHub Discussions](https://github.com/tianlusec/TL-ICScan/discussions)
+- **Security Reports**: See [SECURITY_EN.md](SECURITY_EN.md)
 
 ## License
 
-[MIT License](LICENSE)
+This project is licensed under the [MIT License](LICENSE).
+
+```
+MIT License
+
+Copyright (c) 2024-2025 Tianlu Laboratory
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+```
+
+---
+
+**Developed and maintained as open source by Tianlu Laboratory**
+
+*Making Vulnerability Intelligence Accessible*

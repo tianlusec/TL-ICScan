@@ -11,6 +11,12 @@ import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 
+def sanitize_log(text):
+    if not text: return ""
+    # Mask potential API keys (simple heuristic)
+    text = re.sub(r'(?i)(api[-_]?key|token)=[\w-]+', r'\1=***', text)
+    return text
+
 log_dir = os.path.dirname(os.path.abspath(__file__))
 log_file = os.path.join(log_dir, 'web_ui_errors.log')
 
@@ -108,72 +114,85 @@ def get_db_path():
             
     return os.path.abspath(os.path.join(base_dir, "../tianlu_intel_v2.db"))
 
-@st.cache_data(ttl=3600)
+CACHE_TTL = int(os.getenv("DASHBOARD_CACHE_TTL", 300))
+QUERY_LIMIT = int(os.getenv("DASHBOARD_QUERY_LIMIT", 500))
+
+@st.cache_data(ttl=CACHE_TTL)
 def load_data(severity_list, search_text, date_filter, source_filter, sort_mode):
     db_path = get_db_path()
+    from contextlib import closing
     
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(cve_records)")
-    columns = [info[1] for info in cursor.fetchall()]
-    has_kev = "is_in_kev" in columns
-    
-    select_cols = 'cve_id, severity, cvss_v3_score, title, publish_date, vendors, products, sources, "references"'
-    if has_kev:
-        select_cols += ", is_in_kev, attack_vector"
-
-    query = f"SELECT {select_cols} FROM cve_records WHERE 1=1"
-    params = []
-
-    if severity_list:
-        placeholders = ",".join("?" * len(severity_list))
-        query += f" AND severity IN ({placeholders})"
-        params.extend(severity_list)
-    
-    if source_filter:
-        source_conditions = []
-        for source in source_filter:
-            source_conditions.append("sources LIKE ?")
-            params.append(f'%"{source}"%')
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         
-        if source_conditions:
-            query += " AND (" + " OR ".join(source_conditions) + ")"
-    
-    if search_text:
-        query += " AND (title LIKE ? OR description LIKE ? OR cve_id LIKE ?)"
-        wildcard = f"%{search_text}%"
-        params.extend([wildcard, wildcard, wildcard])
-
-    if len(date_filter) == 2:
-        start_date, end_date = date_filter
-        import datetime as dt
-        next_day = end_date + dt.timedelta(days=1)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(cve_records)")
+        columns = [info[1] for info in cursor.fetchall()]
+        has_kev = "is_in_kev" in columns
         
-        query += " AND publish_date >= ? AND publish_date < ?"
-        params.extend([start_date.isoformat(), next_day.isoformat()])
+        # Define columns safely to avoid SQL injection risks
+        # Whitelist of allowed columns
+        ALLOWED_COLUMNS = {
+            "cve_id", "severity", "cvss_v3_score", "title", "publish_date", 
+            "vendors", "products", "sources", '"references"', 
+            "is_in_kev", "attack_vector"
+        }
 
-    if sort_mode == "CVSS 分数 (最高)":
-        query += " ORDER BY cvss_v3_score DESC, publish_date DESC"
-    elif sort_mode == "严重等级 (最高)":
-        query += """ ORDER BY 
-            CASE 
-                WHEN severity LIKE 'CRITICAL' THEN 1 
-                WHEN severity LIKE 'HIGH' THEN 2 
-                WHEN severity LIKE 'MEDIUM' THEN 3 
-                WHEN severity LIKE 'LOW' THEN 4 
-                ELSE 5 
-            END ASC, cvss_v3_score DESC, publish_date DESC"""
-    else:
-        query += " ORDER BY publish_date DESC"
+        base_cols = ["cve_id", "severity", "cvss_v3_score", "title", "publish_date", "vendors", "products", "sources", '"references"']
+        if has_kev:
+            base_cols.extend(["is_in_kev", "attack_vector"])
 
-    query += " LIMIT 500"
-    
-    try:
+        # Validate columns against whitelist
+        base_cols = [col for col in base_cols if col in ALLOWED_COLUMNS]
+
+        select_cols = ", ".join(base_cols)
+        query = f"SELECT {select_cols} FROM cve_records WHERE 1=1"
+        params = []
+
+        if severity_list:
+            placeholders = ",".join("?" * len(severity_list))
+            query += f" AND severity IN ({placeholders})"
+            params.extend(severity_list)
+        
+        if source_filter:
+            source_conditions = []
+            for source in source_filter:
+                source_conditions.append("sources LIKE ?")
+                params.append(f'%"{source}"%')
+            
+            if source_conditions:
+                query += " AND (" + " OR ".join(source_conditions) + ")"
+        
+        if search_text:
+            query += " AND (title LIKE ? OR description LIKE ? OR cve_id LIKE ?)"
+            wildcard = f"%{search_text}%"
+            params.extend([wildcard, wildcard, wildcard])
+
+        if len(date_filter) == 2:
+            start_date, end_date = date_filter
+            import datetime as dt
+            next_day = end_date + dt.timedelta(days=1)
+            
+            query += " AND publish_date >= ? AND publish_date < ?"
+            params.extend([start_date.isoformat(), next_day.isoformat()])
+
+        if sort_mode == "CVSS 分数 (最高)":
+            query += " ORDER BY cvss_v3_score DESC, publish_date DESC"
+        elif sort_mode == "严重等级 (最高)":
+            query += """ ORDER BY 
+                CASE 
+                    WHEN severity LIKE 'CRITICAL' THEN 1 
+                    WHEN severity LIKE 'HIGH' THEN 2 
+                    WHEN severity LIKE 'MEDIUM' THEN 3 
+                    WHEN severity LIKE 'LOW' THEN 4 
+                    ELSE 5 
+                END ASC, cvss_v3_score DESC, publish_date DESC"""
+        else:
+            query += " ORDER BY publish_date DESC"
+
+        query += f" LIMIT {QUERY_LIMIT}"
+        
         df = pd.read_sql_query(query, conn, params=params)
-    finally:
-        conn.close()
     
     if 'severity' in df.columns:
         df['severity'] = df['severity'].astype(str).str.upper().str.strip()
@@ -267,18 +286,19 @@ cve_to_check = st.text_input("输入 CVE ID 查看完整详情 (例如 CVE-2025-
 data = None
 if cve_to_check:
     db_path = get_db_path()
-    conn = sqlite3.connect(db_path)
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM cve_records WHERE cve_id = ?", (cve_to_check,))
-        row = cursor.fetchone()
-        if row:
-            col_names = [description[0] for description in cursor.description] if cursor.description else []
-            data = dict(zip(col_names, row))
-        else:
-            data = None
-    finally:
-        conn.close()
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM cve_records WHERE cve_id = ?", (cve_to_check,))
+            row = cursor.fetchone()
+            if row:
+                col_names = [description[0] for description in cursor.description] if cursor.description else []
+                data = dict(zip(col_names, row))
+            else:
+                data = None
+    except Exception as e:
+        st.error(f"Database error: {e}")
+        data = None
 
 import html
 
@@ -318,77 +338,78 @@ if data:
     for ref in refs_list:
         st.markdown(f"- {ref}")
             
-    else:
-        st.warning(f"本地数据库中未找到 {cve_to_check}。")
+elif cve_to_check:
+    st.warning(f"本地数据库中未找到 {cve_to_check}。")
+    
+    if st.button(f"尝试在线查询并入库 {cve_to_check}"):
+        if not re.match(r"^CVE-\d{4}-\d{4,}$", cve_to_check):
+            st.error("无效的 CVE ID 格式。")
+            st.stop()
+
+        status_text = st.empty()
+        status_text.info("正在从 NVD 查询数据，请稍候...")
         
-        if st.button(f"尝试在线查询并入库 {cve_to_check}"):
-            if not re.match(r"^CVE-\d{4}-\d{4,}$", cve_to_check):
-                st.error("无效的 CVE ID 格式。")
-                st.stop()
+        python_exe = sys.executable
+        
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(current_dir, ".."))
+        
+        rust_bin_rel = os.path.join("tianlu-intel-core", "target", "release", "tianlu-intel-core")
+        if os.name == 'nt':
+            rust_bin_rel += ".exe"
+        
+        rust_bin = os.path.join(project_root, rust_bin_rel)
+        
+        if not os.path.exists(rust_bin):
+            st.error(f"找不到 tianlu-intel-core 二进制文件: {rust_bin}")
+            st.stop()
+        
+        try:
+            env = os.environ.copy()
+            env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
+            
+            collect_cmd = [python_exe, "-m", "tianlu_intel_collectors.nvd", "--cve-id", cve_to_check]
+            try:
+                proc_collect = subprocess.run(
+                    collect_cmd, 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=120, 
+                    env=env,
+                    cwd=project_root 
+                )
+            except subprocess.TimeoutExpired:
+                logging.error(f"采集超时 (CVE: {cve_to_check}) after 120s")
+                status_text.error("采集超时，请稍后重试或联系管理员。")
+                raise
 
-            status_text = st.empty()
-            status_text.info("正在从 NVD 查询数据，请稍候...")
-            
-            python_exe = sys.executable
-            
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.abspath(os.path.join(current_dir, ".."))
-            
-            rust_bin_rel = os.path.join("tianlu-intel-core", "target", "release", "tianlu-intel-core")
-            if os.name == 'nt':
-                rust_bin_rel += ".exe"
-            
-            rust_bin = os.path.join(project_root, rust_bin_rel)
-            
-            if not os.path.exists(rust_bin):
-                st.error(f"找不到 tianlu-intel-core 二进制文件: {rust_bin}")
+            if proc_collect.returncode != 0:
+                stdout_snip = sanitize_log((proc_collect.stdout or "")[:10000])
+                stderr_snip = sanitize_log((proc_collect.stderr or "")[:10000])
+                logging.error(f"采集失败 (CVE: {cve_to_check}):\nSTDOUT: {stdout_snip}... (truncated)\nSTDERR: {stderr_snip}... (truncated)")
+                status_text.error("采集失败，请联系管理员查看 web_ui_errors.log 日志。")
             else:
+                max_input = 5 * 1024 * 1024
+                payload = (proc_collect.stdout or "")[:max_input]
+
+                ingest_cmd = [rust_bin, "ingest", "--source", "nvd", "--db", db_path]
                 try:
-                    env = os.environ.copy()
-                    env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
-                    
-                    collect_cmd = [python_exe, "-m", "tianlu_intel_collectors.nvd", "--cve-id", cve_to_check]
-                    try:
-                        proc_collect = subprocess.run(
-                            collect_cmd, 
-                            capture_output=True, 
-                            text=True, 
-                            timeout=120, 
-                            env=env,
-                            cwd=project_root 
-                        )
-                    except subprocess.TimeoutExpired:
-                        logging.error(f"采集超时 (CVE: {cve_to_check}) after 120s")
-                        status_text.error("采集超时，请稍后重试或联系管理员。")
-                        raise
+                    proc_ingest = subprocess.run(ingest_cmd, input=payload, capture_output=True, text=True, timeout=120, env=os.environ.copy())
+                except subprocess.TimeoutExpired:
+                    logging.error(f"入库超时 (CVE: {cve_to_check}) after 120s")
+                    status_text.error("入库超时，请稍后重试或联系管理员。")
+                    raise
 
-                    if proc_collect.returncode != 0:
-                        stdout_snip = (proc_collect.stdout or "")[:2000]
-                        stderr_snip = (proc_collect.stderr or "")[:2000]
-                        logging.error(f"采集失败 (CVE: {cve_to_check}):\nSTDOUT: {stdout_snip}... (truncated)\nSTDERR: {stderr_snip}... (truncated)")
-                        status_text.error("采集失败，请联系管理员查看 web_ui_errors.log 日志。")
-                    else:
-                        max_input = 5 * 1024 * 1024
-                        payload = (proc_collect.stdout or "")[:max_input]
+                if proc_ingest.returncode == 0:
+                    status_text.success("查询并入库成功！请重新点击查询或刷新页面。")
+                    st.balloons()
+                    load_data.clear()
+                else:
+                    out_snip = (proc_ingest.stdout or "")[:10000]
+                    err_snip = (proc_ingest.stderr or "")[:10000]
+                    logging.error(f"入库失败 (CVE: {cve_to_check}):\nSTDOUT: {out_snip}... (truncated)\nSTDERR: {err_snip}... (truncated)")
+                    status_text.error("入库失败，请联系管理员查看 web_ui_errors.log 日志。")
 
-                        ingest_cmd = [rust_bin, "ingest", "--source", "nvd", "--db", db_path]
-                        try:
-                            proc_ingest = subprocess.run(ingest_cmd, input=payload, capture_output=True, text=True, timeout=120, env=os.environ.copy())
-                        except subprocess.TimeoutExpired:
-                            logging.error(f"入库超时 (CVE: {cve_to_check}) after 120s")
-                            status_text.error("入库超时，请稍后重试或联系管理员。")
-                            raise
-
-                        if proc_ingest.returncode == 0:
-                            status_text.success("查询并入库成功！请重新点击查询或刷新页面。")
-                            st.balloons()
-                            load_data.clear()
-                        else:
-                            out_snip = (proc_ingest.stdout or "")[:2000]
-                            err_snip = (proc_ingest.stderr or "")[:2000]
-                            logging.error(f"入库失败 (CVE: {cve_to_check}):\nSTDOUT: {out_snip}... (truncated)\nSTDERR: {err_snip}... (truncated)")
-                            status_text.error("入库失败，请联系管理员查看 web_ui_errors.log 日志。")
-
-                except Exception as e:
-                    logging.error(f"执行出错 (CVE: {cve_to_check}): {e}", exc_info=True)
-                    status_text.error("系统内部错误，请联系管理员。")
+        except Exception as e:
+            logging.error(f"执行出错 (CVE: {cve_to_check}): {e}", exc_info=True)
+            status_text.error("系统内部错误，请联系管理员。")
