@@ -18,3 +18,5 @@ futures = "0.3"
 serde_yaml = "0.9.34"
 csv = "1.3"
 thiserror = "2.0.17"
+# Pin home crate to avoid edition2024 error in newer versions
+home = "=0.5.9"

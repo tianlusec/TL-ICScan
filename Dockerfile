@@ -1,5 +1,5 @@
 # Stage 1: Build Rust Core
-FROM rust:1.75-slim-bookworm as builder
+FROM rust:1.83-slim-bookworm as builder
 
 WORKDIR /build
 
