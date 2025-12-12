@@ -100,6 +100,10 @@ sort_mode = st.sidebar.selectbox(
 )
 
 def get_db_path():
+    env_path = os.getenv("TIANLU_DB_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
+
     base_dir = os.path.dirname(os.path.abspath(__file__))
     possible_paths = [
         os.path.join(base_dir, "tianlu_intel_v2.db"),
