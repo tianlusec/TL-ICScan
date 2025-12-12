@@ -27,18 +27,15 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
+COPY tianlu_intel_collectors ./tianlu_intel_collectors
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy Rust binary from builder
 COPY --from=builder /build/tianlu-intel-core/target/release/tianlu-intel-core /usr/local/bin/tianlu-intel-core
 
 # Copy application code
-COPY tianlu_intel_collectors ./tianlu_intel_collectors
 COPY web_ui ./web_ui
 COPY watchlist.yml .
-
-# Install the collectors package
-RUN pip install -e ./tianlu_intel_collectors
 
 # Create a script for updating data
 RUN echo '#!/bin/bash\n\
